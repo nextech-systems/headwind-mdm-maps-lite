@@ -1,33 +1,51 @@
-# Headwind MDM Maps Lite
+# MDM Maps Lite - Community Plugin
 
-A free GPS tracking and location history plugin for Headwind MDM Community Edition.
+An open-source GPS tracking solution for Headwind MDM Community Edition users.
+
+## About
+
+This is an independent community project that provides basic GPS tracking functionality for organizations using Headwind MDM Community Edition. It fills a gap for users who need simple location tracking but don't require enterprise-level features.
+
+**Note:** This is an unofficial, community-maintained plugin. For full-featured enterprise GPS tracking with advanced analytics, reporting, and support, consider Headwind MDM Enterprise Edition.
 
 ## Features
 
-- Real-time device location display on interactive map
-- Historical GPS trail visualization 
-- Device filtering and selection
-- Automatic location data backup
-- Integration with Headwind MDM PostgreSQL database
+- Basic device location display
+- Simple location history trails
+- Device status overview
+- Open-source and community-maintained
+- Designed for Community Edition users
+
+## Who This Is For
+
+- Organizations using Headwind MDM Community Edition
+- Users needing basic GPS tracking functionality
+- Open-source enthusiasts and developers
+- Those who want to contribute to the Headwind MDM ecosystem
 
 ## Installation
 
-1. Install dependencies:
+1. Install Python dependencies:
 ```bash
    pip install -r requirements.txt
 
-Configure your database connection in src/server.py
-Run the server:
+Configure database connection in src/server.py
+Run the application:
 
 bash   python3 src/server.py
 
-Open http://localhost:5003 in your web browser
+Access via web browser: http://localhost:5003
 
 Requirements
 
 Headwind MDM Community Edition
 Python 3.7+
 PostgreSQL database access
+Devices with location permissions enabled
 
+Contributing
+This is a community project. Contributions, bug reports, and feature requests are welcome through GitHub issues and pull requests.
+Disclaimer
+This is an independent project not affiliated with or supported by Headwind MDM. For official support and enterprise features, please contact Headwind MDM directly.
 License
-Open source project for Headwind MDM community.
+Open source project for the Headwind MDM community.
