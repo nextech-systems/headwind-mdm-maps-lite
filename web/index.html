@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Device Locations with History - Headwind MDM</title>
+    
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+    
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background-color: #f5f5f5;
+        }
+
+        .header {
+            background: #2c3e50;
+            color: white;
+            padding: 15px 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .controls {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+
+        .btn {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+
+        .btn-refresh { background: #3498db; color: white; }
+        .btn-history { background: #e74c3c; color: white; }
+        .btn-clear { background: #95a5a6; color: white; }
+
+        select {
+            padding: 5px;
+            border-radius: 4px;
+            border: 1px solid #ccc;
+        }
+
+        #map { height: calc(100vh - 120px); width: 100%; }
+        .loading { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: rgba(255,255,255,0.9); padding: 20px; border-radius: 8px; z-index: 1000; }
+        .loading.hidden { display: none; }
+
+        .device-popup { min-width: 220px; }
+        .device-popup h4 { margin: 0 0 8px 0; color: #2c3e50; font-size: 16px; }
+        .device-popup .detail { margin: 4px 0; font-size: 13px; }
+
+        .status-bar {
+            background: #34495e;
+            color: white;
+            padding: 8px 20px;
+            font-size: 12px;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h2>Device Locations & History</h2>
+        <div class="controls">
+            <button id="refreshBtn" class="btn btn-refresh">Refresh All</button>
+            <select id="deviceSelect">
+                <option value="">Select device for history...</option>
+            </select>
+            <select id="daysSelect">
+                <option value="1">1 day</option>
+                <option value="3">3 days</option>
+                <option value="7" selected>7 days</option>
+                <option value="14">14 days</option>
+                <option value="30">30 days</option>
+            </select>
+            <button id="showHistoryBtn" class="btn btn-history">Show Trail</button>
+            <button id="clearHistoryBtn" class="btn btn-clear">Show All</button>
+        </div>
+    </div>
+    
+    <div id="statusBar" class="status-bar">All devices visible</div>
+    <div id="map"></div>
+    <div id="loading" class="loading">Loading...</div>
+    
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    
+    <script>
+        class MapsHistoryApp {
+            constructor() {
+                this.map = null;
+                this.allDevicesLayer = null;  // Layer for all devices
+                this.historyLayer = null;     // Layer for history trail
+                this.devices = [];
+                this.allLocations = [];
+                this.historyMode = false;
+                this.init();
+            }
+
+            init() {
+                this.initMap();
+                this.loadDevices();
+                this.loadDeviceLocations();
+                this.bindEvents();
+                
+                // Auto-refresh device list every 2 minutes for new devices
+                setInterval(() => {
+                    this.loadDevices();
+                }, 2 * 60 * 1000);
+            }
+
+            initMap() {
+                this.map = L.map('map').setView([18.1096, -77.2975], 10);
+                L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                    attribution: '&copy; OpenStreetMap contributors',
+                    maxZoom: 18
+                }).addTo(this.map);
+
+                // Create layer groups
+                this.allDevicesLayer = L.layerGroup().addTo(this.map);
+                this.historyLayer = L.layerGroup();
+            }
+
+            bindEvents() {
+                document.getElementById('refreshBtn').addEventListener('click', () => {
+                    this.loadDeviceLocations();
+                    this.loadDevices();
+                });
+
+                document.getElementById('showHistoryBtn').addEventListener('click', () => {
+                    this.showDeviceHistory();
+                });
+
+                document.getElementById('clearHistoryBtn').addEventListener('click', () => {
+                    this.showAllDevices();
+                });
+            }
+
+            async loadDevices() {
+                try {
+                    const response = await fetch('/api/devices');
+                    const newDevices = await response.json();
+                    
+                    if (JSON.stringify(newDevices) !== JSON.stringify(this.devices)) {
+                        this.devices = newDevices;
+                        this.updateDeviceDropdown();
+                    }
+                } catch (error) {
+                    console.error('Failed to load devices:', error);
+                }
+            }
+
+            updateDeviceDropdown() {
+                const select = document.getElementById('deviceSelect');
+                const currentValue = select.value;
+                
+                select.innerHTML = '<option value="">Select device for history...</option>';
+                
+                this.devices.forEach(device => {
+                    const option = document.createElement('option');
+                    option.value = device.number;
+                    option.textContent = device.name;
+                    select.appendChild(option);
+                });
+                
+                if (currentValue && this.devices.some(d => d.number === currentValue)) {
+                    select.value = currentValue;
+                }
+            }
+
+            async loadDeviceLocations(silent = false) {
+                if (!silent) {
+                    document.getElementById('loading').classList.remove('hidden');
+                }
+
+                try {
+                    const response = await fetch('/api/locations');
+                    const locations = await response.json();
+                    this.allLocations = locations;
+                    
+                    if (!this.historyMode) {
+                        this.updateMap(locations);
+                        this.updateStatus(`${locations.length} devices visible`);
+                    }
+                } catch (error) {
+                    console.error('Failed to load locations:', error);
+                } finally {
+                    document.getElementById('loading').classList.add('hidden');
+                }
+            }
+
+            updateMap(locations) {
+                // Clear the all devices layer
+                this.allDevicesLayer.clearLayers();
+
+                const bounds = [];
+
+                locations.forEach(device => {
+                    const lat = parseFloat(device.lat);
+                    const lon = parseFloat(device.lon);
+                    if (isNaN(lat) || isNaN(lon)) return;
+
+                    bounds.push([lat, lon]);
+
+                    const marker = L.circleMarker([lat, lon], {
+                        radius: 8,
+                        fillColor: '#27ae60',
+                        color: '#fff',
+                        weight: 2,
+                        opacity: 1,
+                        fillOpacity: 0.8
+                    });
+
+                    const popup = this.createPopupContent(device);
+                    marker.bindPopup(popup);
+                    this.allDevicesLayer.addLayer(marker);
+                });
+
+                if (bounds.length > 0) {
+                    this.map.fitBounds(bounds, { padding: [20, 20] });
+                }
+            }
+
+            async showDeviceHistory() {
+                const deviceNumber = document.getElementById('deviceSelect').value;
+                const days = document.getElementById('daysSelect').value;
+                
+                if (!deviceNumber) {
+                    alert('Please select a device first');
+                    return;
+                }
+
+                document.getElementById('loading').classList.remove('hidden');
+
+                try {
+                    const response = await fetch(`/api/device/${deviceNumber}/history?days=${days}`);
+                    const data = await response.json();
+                    
+                    if (data.error) {
+                        alert(`Error: ${data.error}`);
+                        return;
+                    }
+
+                    this.displayHistory(data, deviceNumber);
+                } catch (error) {
+                    console.error('Failed to load history:', error);
+                    alert('Failed to load device history');
+                } finally {
+                    document.getElementById('loading').classList.add('hidden');
+                }
+            }
+
+            displayHistory(data, deviceNumber) {
+                // Enter history mode
+                this.historyMode = true;
+                
+                // HIDE ALL DEVICES by removing the layer
+                this.map.removeLayer(this.allDevicesLayer);
+                
+                // Clear any existing history
+                this.historyLayer.clearLayers();
+                
+                // Add history layer to map
+                this.map.addLayer(this.historyLayer);
+
+                const history = data.history;
+                if (history.length === 0) {
+                    this.updateStatus('No location history found for this device');
+                    return;
+                }
+
+                // Show only the selected device's current location (larger marker)
+                const selectedDevice = this.allLocations.find(d => d.number === deviceNumber);
+                if (selectedDevice) {
+                    const currentMarker = L.circleMarker([selectedDevice.lat, selectedDevice.lon], {
+                        radius: 12,
+                        fillColor: '#27ae60',
+                        color: '#fff',
+                        weight: 3,
+                        opacity: 1,
+                        fillOpacity: 1
+                    });
+                    
+                    currentMarker.bindPopup(`<strong>CURRENT LOCATION</strong><br>` + this.createPopupContent(selectedDevice));
+                    this.historyLayer.addLayer(currentMarker);
+                }
+
+                // Draw trail line
+                const trailCoords = history.map(point => [point.lat, point.lon]);
+                const trailLine = L.polyline(trailCoords, {
+                    color: '#e74c3c',
+                    weight: 3,
+                    opacity: 0.8,
+                    smoothFactor: 1
+                });
+                this.historyLayer.addLayer(trailLine);
+
+                // Add markers for each historical point
+                history.forEach((point, index) => {
+                    const isLast = index === history.length - 1;
+                    
+                    const marker = L.circleMarker([point.lat, point.lon], {
+                        radius: isLast ? 6 : 3,
+                        fillColor: isLast ? '#27ae60' : '#e74c3c',
+                        color: '#fff',
+                        weight: 1,
+                        opacity: 1,
+                        fillOpacity: isLast ? 1 : 0.7
+                    });
+
+                    const pointTime = new Date(point.time);
+                    const popupContent = `
+                        <div>
+                            <strong>${data.device.description}</strong><br>
+                            <strong>Time:</strong> ${this.formatDateTime(pointTime)}<br>
+                            <strong>Position:</strong> ${point.lat.toFixed(6)}, ${point.lon.toFixed(6)}<br>
+                            ${point.type === 'logged' ? '<strong>GPS Update</strong>' : '<em>Current location</em>'}
+                        </div>
+                    `;
+                    
+                    marker.bindPopup(popupContent);
+                    this.historyLayer.addLayer(marker);
+                });
+
+                // Fit map to trail
+                this.map.fitBounds(trailLine.getBounds(), { padding: [20, 20] });
+                
+                this.updateStatus(`Showing ${history.length} location points for ${data.device.description} - Other devices HIDDEN`);
+            }
+
+            showAllDevices() {
+                // Exit history mode
+                this.historyMode = false;
+                
+                // Remove history layer and show all devices layer
+                this.map.removeLayer(this.historyLayer);
+                this.map.addLayer(this.allDevicesLayer);
+                
+                // Clear history layer
+                this.historyLayer.clearLayers();
+                
+                this.updateStatus(`${this.allLocations.length} devices visible`);
+                
+                // Reset device selection
+                document.getElementById('deviceSelect').value = '';
+            }
+
+            updateStatus(message) {
+                document.getElementById('statusBar').textContent = message;
+            }
+
+            createPopupContent(device) {
+                const lastSeen = new Date(device.time);
+                const formattedTime = this.formatDateTime(lastSeen);
+                
+                return `
+                    <div class="device-popup">
+                        <h4>${device.description || device.number}</h4>
+                        <div class="detail"><strong>Device:</strong> ${device.number}</div>
+                        <div class="detail"><strong>Location:</strong> ${device.lat.toFixed(6)}, ${device.lon.toFixed(6)}</div>
+                        <div class="detail"><strong>Last Seen:</strong> ${formattedTime}</div>
+                    </div>
+                `;
+            }
+
+            formatDateTime(date) {
+                return date.toLocaleDateString('en-US', {
+                    year: 'numeric', month: 'short', day: 'numeric',
+                    hour: '2-digit', minute: '2-digit', hour12: true
+                });
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            new MapsHistoryApp();
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,14 @@
+# Logs and temporary files
+*.log
+nohup.out
+*.backup
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Environment files
+.env
+
+# Database files
+*.db
